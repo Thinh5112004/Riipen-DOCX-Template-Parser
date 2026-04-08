@@ -2,11 +2,11 @@ namespace TemplateParser.Core;
 using DocumentFormat.OpenXml.Wordprocessing;
 using DocumentFormat.OpenXml.Packaging;
 using System.Reflection;
-using DocumentFormat.OpenXml.Office2010.PowerPoint;
 using DocumentFormat.OpenXml.Bibliography;
-using System.Text;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
-using DocumentFormat.OpenXml.Presentation;
+using DocumentFormat.OpenXml.Office2010.Excel;
+using DocumentFormat.OpenXml.Office.CustomUI;
 
 public sealed class DocxParser
 {
@@ -20,15 +20,18 @@ public sealed class DocxParser
             Body? body = wordprocessingDocument?.MainDocumentPart?.Document?.Body;
             ArgumentNullException.ThrowIfNull(body, "Document is empty.");
 
-            //[Week 2] Build section hierarchy using Word heading styles.
-            //holding child and parent with stack
-
-            //mapping the style to node type
-            var styleToNodeType = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            var styleToNodeMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                {"Heading1", "section"},
-                {"Heading2", "subsection"},
-                {"Heading3", "subsubsection"}
+                { "Heading1", "section" },
+                { "Heading2", "subsection" },
+                { "Heading3", "subsubsection" },
+                // Add more mappings as needed
+            };
+            var nodeHierarchy = new List<string> { "section", "subsection", "subsubsection", "paragraph" };
+
+            Node root = new Node
+            {
+                
             };
 
             Stack<Guid> parentStack = new Stack<Guid>();
@@ -36,52 +39,69 @@ public sealed class DocxParser
 
             foreach (Paragraph p in body.Descendants<Paragraph>())
             {
-                // Extracting actual text
-                string? text = p?.InnerText;
-                //Extracting the style
+
+
+                //extracting and displaying the text style
                 string?style = p?.ParagraphProperties?.ParagraphStyleId?.Val ?? "No Style";
 
-                //Creating a new node for each paragraph
+                //Extracting and displaying the actual text
+                string? text = p?.InnerText;
+
+                // 2) [Week 2] Build section hierarchy using Word heading styles.
+
+                //Notes: Maybe use a dictionary to back a new tree data structure,
+                // since guid can be used for O(1) parent lookups
+                // - currently nodes are stored in a flat list, but there is no special
+                // data structure, since parent-child relationships can be determined by
+                // parentId.
+
+                //We are supposed to have some sort of recursion:
+                // SO we may need to rework the parsing loop to be recursive
+
+                //Despite the short comings of the current approach, it should work
+                //all thats left is to assign Json metadata to the node, and
+                //HOW DO WE RECONSTRUCT INTO A JSON FILE????
+
+                Guid newNodeId = Guid.NewGuid();
+                string nodeType = styleToNodeMap.TryGetValue(style, out string mappedType) ? mappedType : "paragraph";
+                string newTitle = text ?? string.Empty;
+                
+                int hierarchyDiff = nodeHierarchy.IndexOf(nodeType) - (parentStack.Count > 0 ? nodeHierarchy.IndexOf(nodes.Find(n => n.Id == parentStack.Peek()).Type) : -1);
+                switch (hierarchyDiff)
+                {
+                    case 0: // same level
+                        if (parentStack.Count > 0) parentStack.Pop();
+                        break;
+                    case > 0: // lower level, do nothing
+                        break;
+                    case < 0: // higher level, pop until we find the correct parent
+                        while (parentStack.Count > 0 && nodeHierarchy.IndexOf(nodes.Find(n => n.Id == parentStack.Peek()).Type) >= nodeHierarchy.IndexOf(nodeType))
+                        {
+                            parentStack.Pop();
+                        }
+                        break;
+                }
+                // Determine order index among siblings, counts shared parentIds
+                int orderIndex = nodes.FindAll(n => n.ParentId == (parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null)).Count();
+                // Create and add the new node
                 Node node = new Node
                 {
-                    Id = Guid.NewGuid(),
+                    Id = newNodeId,
                     TemplateId = templateId,
-                    Type = styleToNodeType.TryGetValue(style, out string nodeType) ? nodeType : "paragraph",
-                    Title = text,
-                    //if type is same as current parrent, then pop
-                    //if type is lower in hier then push
-                    //if type is higher in hier then pop until type is same, then push
-                    OrderIndex = nodes.FindAll(n => n.Type == node.Type).Count + 1,
+                    Type = nodeType,
+                    Title = newTitle,
+                    OrderIndex = orderIndex,
                     ParentId = parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null,
-                    MetadataJson = "{}"
+                    MetadataJson = "{}" // metadata
                 };
-                //enque node to tree
-                nodes.Add(node);
-                parentStack.Push(node.Id);
+                node.MetadataJson = JsonSerializer.Serialize(node);
+                nodes.Add(node); // add new node to list, parentId points up the tree
+                parentStack.Push(node.Id); //new node becomes the current parent
             }
+
+            
+        }
         
-        // 2) [Week 2] Build section hierarchy using Word heading styles.
-        //TO DO LIST: 
-            //--Mapping style names to node types
-            //---[heading 1 --> section 
-            //    heading 2 --> subsection
-            //     heading 3 --> subsubsection] (JSON format)
-
-
-
-            //Generating random UUIDs [Random(Guid.NewGuid())]
-            // if (string.IsNullOrEmpty(filePath))
-            // {
-            //     throw new ArgumentException("Document is empty");
-            // }
-            // //converting ID into bytes
-            // byte[] idBytes = templateId.ToByteArray();
-            // //converting filepath into bytes
-            // byte[] fileBytes = Encoding.UTF8.GetBytes(filePath);
-
-
-        //
-
         // 3) [Week 3] Detect tables, lists, and images as structured content nodes.
         // 4) [Week 4] Add formatting heuristics for files missing heading styles.
         // 5) [Week 2-4] Create Node instances with:
@@ -99,6 +119,6 @@ public sealed class DocxParser
         //
         // Do not place parsing logic in the CLI project; keep it in Core.
         throw new NotImplementedException("DOCX parsing is intentionally not implemented in this starter repository.");
-        }
     }
+    
 }
