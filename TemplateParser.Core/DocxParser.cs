@@ -9,6 +9,7 @@ using DocumentFormat.OpenXml.Office2010.Excel;
 using DocumentFormat.OpenXml.Office.CustomUI;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Drawing.Diagrams;
+using DocumentFormat.OpenXml.Drawing.Charts;
 
 public sealed class DocxParser
 {
@@ -81,36 +82,39 @@ public sealed class DocxParser
                         parentStack.Push(node.Id); //new node becomes the current parent
 
                         break;
-                    }
 
                     case DocumentFormat.OpenXml.Wordprocessing.Table t:
-                        Guid newNodeId = new Guid();
-                        var rows = t.Descendants<TableRow>().ToList();
-                        
+                        newNodeId = new Guid();
 
-                        
-                        var columns = t.Descendants<TableColumns>();                        
+                        var rows = t.Descendants<TableRow>().ToList();
+
+                        var columns = t.Descendants<TableColumns>().ToList();   
+
+                        string metaData = JsonSerializer.Serialize(t);     
+
+                        orderIndex = nodes.FindAll(n => n.ParentId == (parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null)).Count();                 
 
                         Node tableNode = new Node
                         {
                             Id = newNodeId,
                             TemplateId = templateId,
                             Type = "Table",
-                            Title = ?????????,
-                            OrderIndex = ?????????,
+                            Title = t.XName.LocalName, //COULD BE WRONG
+                            OrderIndex = orderIndex,
                             ParentId = parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null,
-                            MetadataJson = JsonSerializer.Serialize(??????????) // metadata
-                        }
-                        break;
-        }
-        
-        // 3) [Week 3] Detect tables, lists, and images as structured content nodes.
-        //Extracting document as table, lists, or images
-        //table including(heading 1, heading 2, heading 3, ..., data (paragraph?))
-            
-        
-        //
+                            MetadataJson = metaData
+                        };
 
+                        nodes.Add(tableNode);
+
+                        break;
+            }
+
+            foreach (var item in nodes)
+            {
+                Console.WriteLine($"Type: {item.Type}, Title: {item.Title}, OrderIndex: {item.OrderIndex}, ParentId: {item.ParentId}, MetaDataJson: {item.MetadataJson}");
+            }
+        }
         // 4) [Week 4] Add formatting heuristics for files missing heading styles.
         // 5) [Week 2-4] Create Node instances with:
         //    - Id: new Guid for each node
@@ -128,4 +132,6 @@ public sealed class DocxParser
         // Do not place parsing logic in the CLI project; keep it in Core.
         throw new NotImplementedException("DOCX parsing is intentionally not implemented in this starter repository.");
     }
+    }
+}
     
