@@ -10,6 +10,9 @@ using DocumentFormat.OpenXml.Office.CustomUI;
 using DocumentFormat.OpenXml.Spreadsheet;
 using DocumentFormat.OpenXml.Drawing.Diagrams;
 using DocumentFormat.OpenXml.Drawing.Charts;
+using DocumentFormat.OpenXml.Office2013.Excel;
+using DocumentFormat.OpenXml.Office2010.Drawing;
+using DocumentFormat.OpenXml.Drawing.Wordprocessing;
 
 public sealed class DocxParser
 {
@@ -30,7 +33,7 @@ public sealed class DocxParser
                 { "Heading3", "subsubsection" },
                 // Add more mappings as needed
             };
-            var nodeHierarchy = new List<string> { "section", "subsection", "subsubsection", "paragraph" };
+            var nodeHierarchy = new List<string> { "section", "subsection", "subsubsection", "paragraph"};
 
             Stack<Guid> parentStack = new Stack<Guid>();
             List<Node> nodes = new List<Node>();
@@ -84,13 +87,21 @@ public sealed class DocxParser
                         break;
 
                     case DocumentFormat.OpenXml.Wordprocessing.Table t:
-                        newNodeId = new Guid();
+                        newNodeId = Guid.NewGuid();
 
-                        var rows = t.Descendants<TableRow>().ToList();
+                        var tableRows = t.Descendants<TableRow>().ToList();
+                        var Data = tableRows.Select(row => row.Descendants<TableCell>().Select(cell => cell.InnerText).ToList());
 
-                        var columns = t.Descendants<TableColumns>().ToList();   
-
-                        string metaData = JsonSerializer.Serialize(t);     
+                        int rowCount = tableRows.Count;
+                        int ColCount = Data.Any() ? Data.Max(r => r.Count) : 0;
+                        
+                        var tableMetadata = new
+                        {
+                            Rows = rowCount,
+                            Columns = ColCount,
+                            tableData = Data
+                        };
+   
 
                         orderIndex = nodes.FindAll(n => n.ParentId == (parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null)).Count();                 
 
@@ -99,20 +110,64 @@ public sealed class DocxParser
                             Id = newNodeId,
                             TemplateId = templateId,
                             Type = "Table",
-                            Title = t.XName.LocalName, //COULD BE WRONG
+                            Title = t.LocalName, 
                             OrderIndex = orderIndex,
                             ParentId = parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null,
-                            MetadataJson = metaData
+                            MetadataJson = JsonSerializer.Serialize(tableMetadata)
                         };
 
                         nodes.Add(tableNode);
+
+                        break;
+                    case DocumentFormat.OpenXml.Wordprocessing.Drawing d:
+                        newNodeId = Guid.NewGuid();
+
+                        var inline = d.Descendants<Inline>().FirstOrDefault();
+
+                        var extent = inline?.Extent;
+                        var prop = inline?.DocProperties;
+
+                        long height =  extent?.Cx ?? 0 ;
+                        long width = extent?.Cy ?? 0;
+
+                        string imgTitle = prop.Title?.Value?? string.Empty;
+                        string imgDes = prop.Description?.Value?? string.Empty;
+
+
+                        var imageData = new
+                        {
+                          w = width,
+                          h = height,
+                          title = imgTitle,
+                          des = imgDes
+                        };
+
+                        orderIndex = nodes.FindAll(n => n.ParentId == (parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null)).Count();
+
+                        Node imageNode = new Node
+                        {
+                            Id = newNodeId,
+                            TemplateId = templateId,
+                            Type = "Image",
+                            Title = imgTitle, 
+                            OrderIndex = orderIndex,
+                            ParentId = parentStack.Count > 0 ? parentStack.Peek() : (Guid?)null,
+                            MetadataJson = JsonSerializer.Serialize(imageData)
+                        };
+                        
+                        nodes.Add(imageNode);
 
                         break;
             }
 
             foreach (var item in nodes)
             {
-                Console.WriteLine($"Type: {item.Type}, Title: {item.Title}, OrderIndex: {item.OrderIndex}, ParentId: {item.ParentId}, MetaDataJson: {item.MetadataJson}");
+                // The ",-15" pads the string with spaces so the next item always starts in the same column
+                Console.WriteLine($"Type: {item.Type,-12} | Order: {item.OrderIndex,-2} | Parent: {item.ParentId,-38} | Title: {item.Title}");
+                
+                // Print metadata on its own line so it doesn't break the columns
+                Console.WriteLine($"   Metadata: {item.MetadataJson}");
+                Console.WriteLine(new string('-', 80)); // Adds a separator line
             }
         }
         // 4) [Week 4] Add formatting heuristics for files missing heading styles.
